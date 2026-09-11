@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Timestamp — photo date/time editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/piexifjs/1.0.6/piexif.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg: #1C1A17;
+    --panel: #26221D;
+    --panel-raised: #2F2A23;
+    --line: #3A342B;
+    --amber: #E8A33D;
+    --amber-dim: #8A6321;
+    --text: #F2EDE4;
+    --muted: #948C7C;
+    --danger: #C1533B;
+    --ok: #7FA06F;
+    --mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+    --sans: "Inter", -apple-system, "Segoe UI", sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  * { box-sizing: border-box; }
+  html,body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); }
+  body{ padding: 28px 20px 60px; }
+
+  .wrap{ max-width: 880px; margin: 0 auto; }
+
+  header{ margin-bottom: 22px; }
+  .eyebrow-row{ display:flex; align-items:baseline; gap:10px; margin-bottom:6px; }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--amber); box-shadow:0 0 8px var(--amber); flex-shrink:0; }
+  h1{ font-size: 1.4rem; font-weight:600; margin:0; letter-spacing:-0.01em; }
+  .sub{ color:var(--muted); font-size:0.88rem; margin:4px 0 0; line-height:1.5; max-width: 60ch; }
+
+  .dropzone{
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel);
+    padding: 34px 20px;
+    text-align:center;
+    cursor:pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .dropzone.drag{ border-color: var(--amber); background: var(--panel-raised); }
+  .dropzone p{ margin:0; color:var(--muted); font-size:0.9rem; }
+  .dropzone strong{ color:var(--text); font-weight:500; }
+  input[type=file]{ display:none; }
+
+  .global-bar{
+    display:none;
+    margin-top:18px;
+    background: var(--panel);
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:14px 16px;
+    align-items:flex-end;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+  .global-bar.show{ display:flex; }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field label{ font-size:0.7rem; color:var(--muted); letter-spacing:0.02em; }
+  .field input{
+    background: var(--bg);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:0.85rem;
+    padding:7px 9px;
+    border-radius:2px;
+  }
+  .field input:focus{ outline:none; border-color:var(--amber); }
+  .btn{
+    background: var(--amber);
+    color:#221A0C;
+    border:none;
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:0.82rem;
+    padding:8px 14px;
+    border-radius:2px;
+    cursor:pointer;
+  }
+  .btn:hover{ background:#f0ae4c; }
+  .btn.secondary{
+    background:transparent;
+    color:var(--text);
+    border:1px solid var(--line);
+    font-weight:500;
+  }
+  .btn.secondary:hover{ border-color:var(--muted); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .list{ margin-top: 22px; display:flex; flex-direction:column; gap:1px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .row{
+    background: var(--panel);
+    display:grid;
+    grid-template-columns: 56px 1fr auto;
+    gap:14px;
+    align-items:center;
+    padding:12px 14px;
+  }
+  .thumb{
+    width:56px; height:56px; border-radius:2px; object-fit:cover;
+    background:var(--panel-raised); border:1px solid var(--line);
+  }
+  .meta{ min-width:0; }
+  .fname{ font-size:0.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .exif-line{ font-family:var(--mono); font-size:0.76rem; color:var(--muted); margin-top:3px; }
+  .exif-line .none{ color:var(--danger); }
+  .row-controls{ display:flex; align-items:center; gap:8px; }
+  .row-controls input{
+    background: var(--bg);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:0.8rem;
+    padding:6px 8px;
+    border-radius:2px;
+    width: 132px;
+  }
+  .row-controls input:focus{ outline:none; border-color:var(--amber); }
+  .status{ font-size:0.72rem; width:64px; text-align:right; }
+  .status.pending{ color:var(--muted); }
+  .status.done{ color:var(--ok); }
+
+  .footer-bar{
+    display:none;
+    margin-top:18px;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+  }
+  .footer-bar.show{ display:flex; }
+  .count{ font-size:0.8rem; color:var(--muted); }
+
+  .note{ margin-top:26px; font-size:0.78rem; color:var(--muted); line-height:1.6; border-top:1px solid var(--line); padding-top:16px; }
+
+  @media (max-width: 560px) {
+    body{ padding: 20px 14px 60px; }
+    .row{
+      grid-template-columns: 44px 1fr;
+      grid-template-rows: auto auto;
+      row-gap: 10px;
+    }
+    .thumb{ width:44px; height:44px; grid-row: 1 / 3; }
+    .row-controls{
+      grid-column: 1 / 3;
+      flex-wrap: wrap;
+    }
+    .row-controls input{ width: calc(50% - 4px); flex: 1 1 auto; }
+    .status{ width: auto; text-align:left; flex-basis: 100%; }
+    .global-bar{ flex-direction: column; align-items: stretch; }
+    .global-bar .field input{ width: 100%; }
+    .footer-bar{ flex-direction: column; align-items: stretch; gap:10px; }
+    .footer-bar .btn{ width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow-row"><div class="dot"></div><h1>Timestamp</h1></div>
+    <p class="sub">Edit the capture date and time embedded in your photos' EXIF data. Upload JPEGs exported from your iPhone, set a new date, and download the corrected files.</p>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    <p><strong>Tap to choose photos</strong> (or drag JPEGs here on desktop)</p>
+  </div>
+  <input type="file" id="fileInput" accept="image/jpeg" multiple>
+
+  <div class="global-bar" id="globalBar">
+    <div class="field">
+      <label for="gDate">Set date (all)</label>
+      <input type="date" id="gDate">
+    </div>
+    <div class="field">
+      <label for="gTime">Set time (all)</label>
+      <input type="time" id="gTime" step="1">
+    </div>
+    <button class="btn secondary" id="applyAllBtn">Apply to all</button>
+  </div>
+
+  <div class="list" id="list"></div>
+
+  <div class="footer-bar" id="footerBar">
+    <span class="count" id="count"></span>
+    <button class="btn" id="downloadBtn">Download all as ZIP</button>
+  </div>
+
+  <div class="note" id="note"></div>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const list = document.getElementById('list');
+const globalBar = document.getElementById('globalBar');
+const footerBar = document.getElementById('footerBar');
+const countEl = document.getElementById('count');
+const noteEl = document.getElementById('note');
+
+let items = []; // { id, file, dataUrl, exifDict, dateStr, timeStr, status }
+let seq = 0;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+function handleFiles(fileList) {
+  const files = Array.from(fileList).filter(f => f.type === 'image/jpeg' || /\.jpe?g$/i.test(f.name));
+  const skipped = fileList.length - files.length;
+  if (skipped > 0) {
+    noteEl.textContent = `${skipped} file(s) skipped — this tool edits JPEG EXIF data only. HEIC photos need to be converted to JPEG first (share as JPEG from your iPhone, or turn on "Automatic" / "Most Compatible" in Settings > Camera > Formats).`;
+  }
+  files.forEach(readFile);
+}
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const dataUrl = e.target.result;
+    let exifDict;
+    try {
+      exifDict = piexif.load(dataUrl);
+    } catch (err) {
+      exifDict = { '0th': {}, 'Exif': {}, 'GPS': {}, '1st': {} };
+    }
+    const existing = exifDict.Exif[piexif.ExifIFD.DateTimeOriginal] || exifDict['0th'][piexif.ImageIFD.DateTime];
+    const parsed = parseExifDate(existing);
+
+    const item = {
+      id: seq++,
+      file,
+      dataUrl,
+      exifDict,
+      dateStr: parsed ? parsed.date : '',
+      timeStr: parsed ? parsed.time : '',
+      hadOriginal: !!existing,
+      status: 'pending'
+    };
+    items.push(item);
+    renderList();
+  };
+  reader.readAsDataURL(file);
+}
+
+function parseExifDate(exifStr) {
+  // EXIF format: "YYYY:MM:DD HH:MM:SS"
+  if (!exifStr) return null;
+  const m = exifStr.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  return { date: `${m[1]}-${m[2]}-${m[3]}`, time: `${m[4]}:${m[5]}:${m[6]}` };
+}
+
+function toExifDate(dateStr, timeStr) {
+  const [y, mo, d] = dateStr.split('-');
+  const t = timeStr.length === 5 ? timeStr + ':00' : timeStr;
+  return `${y}:${mo}:${d} ${t}`;
+}
+
+function renderList() {
+  list.innerHTML = '';
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.src = item.dataUrl;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const fname = document.createElement('div');
+    fname.className = 'fname';
+    fname.textContent = item.file.name;
+    const exifLine = document.createElement('div');
+    exifLine.className = 'exif-line';
+    exifLine.innerHTML = item.hadOriginal
+      ? `original: ${item.dateStr} ${item.timeStr}`
+      : `<span class="none">no capture date found in EXIF</span>`;
+    meta.appendChild(fname);
+    meta.appendChild(exifLine);
+
+    const controls = document.createElement('div');
+    controls.className = 'row-controls';
+
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = item.dateStr;
+    dateInput.addEventListener('input', () => { item.dateStr = dateInput.value; item.status = 'pending'; renderList(); });
+
+    const timeInput = document.createElement('input');
+    timeInput.type = 'time';
+    timeInput.step = '1';
+    timeInput.value = item.timeStr;
+    timeInput.addEventListener('input', () => { item.timeStr = timeInput.value; item.status = 'pending'; renderList(); });
+
+    const status = document.createElement('span');
+    status.className = 'status ' + (item.status === 'done' ? 'done' : 'pending');
+    status.textContent = item.status === 'done' ? 'updated' : 'ready';
+
+    controls.appendChild(dateInput);
+    controls.appendChild(timeInput);
+    controls.appendChild(status);
+
+    row.appendChild(img);
+    row.appendChild(meta);
+    row.appendChild(controls);
+    list.appendChild(row);
+  });
+
+  globalBar.classList.toggle('show', items.length > 0);
+  footerBar.classList.toggle('show', items.length > 0);
+  countEl.textContent = `${items.length} photo${items.length === 1 ? '' : 's'}`;
+}
+
+document.getElementById('applyAllBtn').addEventListener('click', () => {
+  const gDate = document.getElementById('gDate').value;
+  const gTime = document.getElementById('gTime').value;
+  if (!gDate || !gTime) { alert('Set both a date and a time first.'); return; }
+  items.forEach(item => {
+    item.dateStr = gDate;
+    item.timeStr = gTime;
+    item.status = 'pending';
+  });
+  renderList();
+});
+
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  // iOS Safari only treats window.open as a trusted user action if it happens
+  // synchronously in the click handler — if we wait until after the (async) ZIP
+  // is built to open/navigate anywhere, it silently blocks it. So open a blank
+  // tab right now, then point it at the file once it's ready.
+  const preOpened = window.open('', '_blank');
+
+  const zip = new JSZip();
+  for (const item of items) {
+    if (!item.dateStr || !item.timeStr) continue;
+    const exifDate = toExifDate(item.dateStr, item.timeStr);
+    if (!item.exifDict.Exif) item.exifDict.Exif = {};
+    if (!item.exifDict['0th']) item.exifDict['0th'] = {};
+    item.exifDict.Exif[piexif.ExifIFD.DateTimeOriginal] = exifDate;
+    item.exifDict.Exif[piexif.ExifIFD.DateTimeDigitized] = exifDate;
+    item.exifDict['0th'][piexif.ImageIFD.DateTime] = exifDate;
+    // Software tag is intentionally left untouched — whatever the original file had stays exactly as-is.
+
+    const exifBytes = piexif.dump(item.exifDict);
+    const newDataUrl = piexif.insert(exifBytes, item.dataUrl);
+    const base64 = newDataUrl.split(',')[1];
+    zip.file(item.file.name, base64, { base64: true });
+    item.status = 'done';
+  }
+  renderList();
+  noteEl.textContent = noteEl.textContent
+    ? noteEl.textContent
+    : 'Only the capture date/time fields are modified — the Software tag and every other EXIF field are carried over from the original file with no changes.';
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+
+  if (preOpened) {
+    // Navigating the already-open tab keeps it tied to the user's tap on iOS,
+    // and Safari shows its normal "save to Files" sheet for the blob.
+    preOpened.location.href = url;
+  } else {
+    // Pop-up got blocked (or desktop) — fall back to a plain download link.
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'timestamped-photos.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
